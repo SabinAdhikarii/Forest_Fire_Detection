@@ -1,0 +1,1512 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>Surakshya - Nepal Forest Fire Detection</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/onnxruntime-web/1.16.3/ort.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #f5f4f1;
+            --cards: #ffffff;
+            --border-light: #e2e0da;
+            --border-dark: #d0cec8;
+            --fire: #c8290a;
+            --fire-hover: #e03a1a;
+            --fire-light: #f05a38;
+            --fire-bg: #fff2ee;
+            --safe: #1a7a3c;
+            --safe-hover: #22a052;
+            --safe-bg: #edfaf2;
+            --warn: #b86000;
+            --warn-hover: #d97800;
+            --warn-bg: #fff8ee;
+            --smoke: #5a6475;
+            --text-main: #111827;
+            --text-muted: #6b7280;
+            --sidebar-w: 228px;
+            --topbar-h: 58px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text-main);
+            overflow: hidden;
+            display: flex;
+            height: 100vh;
+        }
+
+        /* Layout */
+        .sidebar {
+            width: var(--sidebar-w);
+            background-color: var(--cards);
+            border-right: 1px solid var(--border-light);
+            display: flex;
+            flex-direction: column;
+            z-index: 10;
+            flex-shrink: 0;
+        }
+
+        .main-wrapper { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+        .topbar {
+            height: var(--topbar-h);
+            background-color: var(--cards);
+            border-bottom: 1px solid var(--border-light);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            z-index: 9;
+            flex-shrink: 0;
+        }
+
+        .main-content { flex: 1; overflow-y: auto; padding: 24px; scroll-behavior: smooth; }
+
+        /* Sidebar */
+        .brand {
+            height: var(--topbar-h);
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            font-weight: 700;
+            font-size: 1.25rem;
+            color: var(--fire);
+            border-bottom: 1px solid var(--border-light);
+            flex-shrink: 0;
+        }
+
+        .nav-menu { padding: 16px 12px; display: flex; flex-direction: column; gap: 4px; }
+
+        .nav-item {
+            padding: 10px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: var(--text-muted);
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+
+        .nav-item:hover { background-color: var(--bg); color: var(--text-main); }
+        .nav-item.active { background-color: var(--fire-bg); color: var(--fire); }
+        .nav-item svg { width: 20px; height: 20px; flex-shrink: 0; }
+
+        /* Topbar */
+        .top-left { display: flex; align-items: center; gap: 16px; }
+
+        .live-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--fire);
+            background-color: var(--fire-bg);
+            padding: 4px 12px;
+            border-radius: 99px;
+        }
+
+        .pulse {
+            width: 8px; height: 8px;
+            background-color: var(--fire);
+            border-radius: 50%;
+            animation: pulseAnim 2s infinite;
+        }
+
+        @keyframes pulseAnim {
+            0%   { box-shadow: 0 0 0 0 rgba(200,41,10,0.4); }
+            70%  { box-shadow: 0 0 0 6px rgba(200,41,10,0); }
+            100% { box-shadow: 0 0 0 0 rgba(200,41,10,0); }
+        }
+
+        .clock { font-size: 0.875rem; font-weight: 500; color: var(--text-muted); }
+
+        /* Views */
+        .view { display: none; animation: fadeIn 0.3s ease; }
+        .view.active { display: block; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Grid */
+        .grid { display: grid; gap: 20px; }
+        .grid-4 { grid-template-columns: repeat(4, 1fr); }
+        .grid-3 { grid-template-columns: repeat(3, 1fr); }
+        .grid-2 { grid-template-columns: repeat(2, 1fr); }
+        .grid-main-side { grid-template-columns: 2fr 1fr; }
+
+        /* Card */
+        .card {
+            background: var(--cards);
+            border: 1px solid var(--border-light);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            transition: box-shadow 0.2s;
+        }
+        .card:hover { box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+
+        .card-header {
+            font-weight: 600;
+            font-size: 1.1rem;
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* Stats */
+        .stat-val { font-size: 2rem; font-weight: 700; margin: 8px 0; }
+        .stat-desc { font-size: 0.875rem; color: var(--text-muted); }
+        .text-fire { color: var(--fire); }
+        .text-safe { color: var(--safe); }
+        .text-warn { color: var(--warn); }
+
+        /* Map */
+        .map-container {
+            width: 100%; height: 400px;
+            background: #eef2f6;
+            border-radius: 8px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Alerts */
+        .alert-item {
+            padding: 16px;
+            border: 1px solid var(--border-light);
+            border-radius: 8px;
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+        .alert-item.critical { border-left: 4px solid var(--fire); background: var(--fire-bg); }
+        .alert-item.high     { border-left: 4px solid var(--warn); background: var(--warn-bg); }
+
+        .alert-badge { padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+        .badge-critical { background: var(--fire); color: white; }
+        .badge-high     { background: var(--warn); color: white; }
+        .badge-safe     { background: var(--safe); color: white; }
+
+        /* Buttons */
+        .btn { padding: 8px 16px; border-radius: 6px; border: none; font-weight: 500; cursor: pointer; transition: background 0.2s; font-family: inherit; }
+        .btn-outline { background: transparent; border: 1px solid var(--border-dark); color: var(--text-main); }
+        .btn-outline:hover { background: var(--bg); }
+        .btn-fire { background: var(--fire); color: white; }
+        .btn-fire:hover { background: var(--fire-hover); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Upload */
+        .upload-area {
+            border: 2px dashed var(--border-dark);
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: var(--bg);
+        }
+        .upload-area:hover, .upload-area.dragover { border-color: var(--fire); background: var(--fire-bg); }
+
+        /* Progress bars */
+        .progress-bar-container {
+            width: 100%; height: 8px;
+            background: var(--border-light);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .progress-bar { height: 100%; border-radius: 4px; transition: width 0.5s ease-out; width: 0%; }
+
+        /* Model result columns */
+        .model-col {
+            border: 1px solid var(--border-light);
+            border-radius: 8px;
+            padding: 16px;
+        }
+
+        .model-col-header {
+            font-weight: 600;
+            font-size: 0.875rem;
+            margin-bottom: 14px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border-light);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .model-col-row { margin-bottom: 10px; }
+
+        .model-col-label-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            margin-bottom: 4px;
+            color: var(--text-muted);
+        }
+
+        .model-col-pct { font-weight: 600; color: var(--text-main); }
+
+        /* Analytics charts */
+        .chart-mock {
+            width: 100%; height: 250px;
+            display: flex;
+            align-items: flex-end;
+            gap: 12px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-light);
+        }
+        .chart-bar {
+            flex: 1;
+            background: var(--fire-light);
+            border-radius: 4px 4px 0 0;
+            position: relative;
+            min-height: 20px;
+            transition: height 0.5s;
+        }
+        .chart-bar:hover { background: var(--fire); }
+        .chart-label {
+            position: absolute;
+            bottom: -25px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        /* Table */
+        .table { width: 100%; border-collapse: collapse; }
+        .table th, .table td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-light); font-size: 0.875rem; }
+        .table th { color: var(--text-muted); font-weight: 600; }
+
+        /* Model status pills */
+        .status-pill {
+            font-size: 0.75rem;
+            padding: 2px 8px;
+            background: var(--bg);
+            border-radius: 4px;
+            border: 1px solid var(--border-dark);
+        }
+
+        /* Data source badge */
+        .data-source-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            padding: 3px 8px;
+            border-radius: 4px;
+            background: var(--safe-bg);
+            color: var(--safe);
+            border: 1px solid var(--safe);
+        }
+        .data-source-badge.demo {
+            background: var(--warn-bg);
+            color: var(--warn);
+            border-color: var(--warn);
+        }
+        .data-source-badge.error {
+            background: #f3f4f6;
+            color: var(--text-muted);
+            border-color: var(--border-dark);
+        }
+
+        /* Spinner */
+        .spinner {
+            width: 16px; height: 16px;
+            border: 2px solid var(--border-light);
+            border-top-color: var(--fire);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            display: inline-block;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Camera specific styles */
+        .camera-mode-selector {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            border-bottom: 1px solid var(--border-light);
+            padding-bottom: 16px;
+        }
+
+        .mode-btn {
+            flex: 1;
+            padding: 12px;
+            background: var(--bg);
+            border: 1px solid var(--border-dark);
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+            text-align: center;
+        }
+
+        .mode-btn.active {
+            background: var(--fire);
+            color: white;
+            border-color: var(--fire);
+        }
+
+        .mode-btn:hover:not(.active) {
+            background: var(--border-light);
+        }
+
+        .camera-container {
+            position: relative;
+            width: 100%;
+            background: #1a1a2e;
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 16px;
+            min-height: 480px;
+        }
+
+        #video {
+            width: 100%;
+            height: auto;
+            min-height: 480px;
+            max-height: 70vh;
+            object-fit: cover;
+            background: #000;
+            display: block;
+        }
+
+        .camera-controls {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            padding: 16px;
+            background: var(--cards);
+            border-radius: 0 0 12px 12px;
+        }
+
+        .camera-overlay {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.85);
+            backdrop-filter: blur(10px);
+            padding: 12px 16px;
+            border-radius: 12px;
+            color: white;
+            font-weight: 600;
+            text-align: center;
+            z-index: 10;
+            animation: slideUp 0.3s ease;
+        }
+
+        @keyframes slideUp {
+            from { transform: translateY(100%); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        .camera-overlay.fire-alert {
+            background: rgba(200,41,10,0.95);
+            border-left: 4px solid #fff;
+        }
+
+        .camera-overlay.warning-alert {
+            background: rgba(184,96,0,0.95);
+        }
+
+        .real-time-badge {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(8px);
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: white;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            z-index: 10;
+        }
+
+        .recording-dot {
+            width: 8px;
+            height: 8px;
+            background: #ff4444;
+            border-radius: 50%;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        .snapshot-preview {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.9);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: fadeIn 0.2s;
+        }
+
+        .snapshot-preview img {
+            max-width: 90%;
+            max-height: 90%;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        }
+
+        .close-snapshot {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: white;
+            border: none;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            font-size: 24px;
+            cursor: pointer;
+        }
+
+        /* Utilities */
+        .mb-2 { margin-bottom: 8px; }
+        .mb-4 { margin-bottom: 16px; }
+        .mb-6 { margin-bottom: 24px; }
+        .mt-4 { margin-top: 16px; }
+        .flex { display: flex; }
+        .items-center { align-items: center; }
+        .justify-between { justify-content: space-between; }
+        .gap-2 { gap: 8px; }
+        .gap-4 { gap: 16px; }
+
+        /* Alerts list scroll */
+        #alerts-list { max-height: 320px; overflow-y: auto; }
+        #alerts-list:empty::after {
+            content: 'No active alerts';
+            display: block;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            padding: 24px 0;
+        }
+    </style>
+</head>
+
+<body>
+
+<!-- Sidebar -->
+<div class="sidebar">
+    <div class="brand">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" style="margin-right:8px; flex-shrink:0;">
+            <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>
+        </svg>
+        Surakshya
+    </div>
+    <div class="nav-menu">
+        <div class="nav-item active" data-target="dashboard-view">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="7" height="7"></rect>
+                <rect x="14" y="3" width="7" height="7"></rect>
+                <rect x="14" y="14" width="7" height="7"></rect>
+                <rect x="3" y="14" width="7" height="7"></rect>
+            </svg>
+            Dashboard
+        </div>
+        <div class="nav-item" data-target="ai-view">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M2 12h4l3-9 5 18 3-9h5"></path>
+            </svg>
+            AI Prediction
+        </div>
+        <div class="nav-item" data-target="analytics-view">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="20" x2="18" y2="10"></line>
+                <line x1="12" y1="20" x2="12" y2="4"></line>
+                <line x1="6" y1="20" x2="6" y2="14"></line>
+            </svg>
+            Analytics
+        </div>
+    </div>
+</div>
+
+<!-- Main Wrapper -->
+<div class="main-wrapper">
+
+    <!-- Topbar -->
+    <div class="topbar">
+        <div class="top-left">
+            <div class="live-indicator"><div class="pulse"></div> LIVE</div>
+            <div class="clock" id="clock">00:00:00 NST</div>
+        </div>
+        <div class="flex items-center gap-4">
+            <div id="data-source-indicator" style="font-size:0.875rem; font-weight:600; background:var(--cards); border:1px solid var(--border-light); padding:6px 12px; border-radius:20px; color:var(--text-muted);">
+                <span class="spinner"></span> Fetching...
+            </div>
+            <div style="width:32px; height:32px; background:#e5e7eb; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:600; font-size:12px;">AD</div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+
+        <!-- Dashboard View -->
+        <div id="dashboard-view" class="view active">
+            <h1 class="mb-6">Dashboard</h1>
+
+            <div class="grid grid-4 mb-6">
+                <div class="card">
+                    <div class="card-header">Active Fire Zones</div>
+                    <div class="stat-val text-fire" id="active-fire-count">
+                        <span class="spinner"></span>
+                    </div>
+                    <div class="stat-desc" id="active-fire-desc">Fetching from NASA EONET...</div>
+                </div>
+                <div class="card">
+                    <div class="card-header">Sensors Online</div>
+                    <div class="stat-val text-safe">845</div>
+                    <div class="stat-desc">98.2% operational</div>
+                </div>
+                <div class="card">
+                    <div class="card-header">High Risk Districts</div>
+                    <div class="stat-val text-warn">3</div>
+                    <div class="stat-desc">FWI &gt; 30</div>
+                </div>
+                <div class="card">
+                    <div class="card-header">Incidents Resolved</div>
+                    <div class="stat-val">128</div>
+                    <div class="stat-desc">This Year</div>
+                </div>
+            </div>
+
+            <div class="grid grid-main-side">
+                <div class="card">
+                    <div class="card-header">
+                        Nepal Fire Hotspots Map
+                        <span id="map-last-updated" style="font-size:0.75rem; color:var(--text-muted); font-weight:400;"></span>
+                    </div>
+                    <div class="map-container" style="padding:0;">
+                        <div id="leaflet-dash-map" style="width:100%; height:100%; z-index:1; border-radius:8px;"></div>
+                    </div>
+                    <div class="mt-4 flex gap-4" style="font-size:0.875rem;">
+                        <div class="flex items-center gap-2"><div style="width:12px;height:12px;background:var(--fire);border-radius:50%;"></div>Critical</div>
+                        <div class="flex items-center gap-2"><div style="width:12px;height:12px;background:var(--warn);border-radius:50%;"></div>Warning</div>
+                        <div class="flex items-center gap-2"><div style="width:12px;height:12px;background:var(--safe);border-radius:50%;"></div>Safe</div>
+                    </div>
+                </div>
+
+                <div style="display:flex; flex-direction:column; gap:20px;">
+                    <div class="card" style="flex:1;">
+                        <div class="card-header">Recent Alerts</div>
+                        <div id="alerts-list">
+                            <!-- Populated dynamically by fetchFireData() -->
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">Average Response Time</div>
+                        <div class="stat-val">24m</div>
+                        <div class="stat-desc">Target: &lt; 30m</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI PREDICTION VIEW with Camera Support -->
+        <div id="ai-view" class="view">
+            <h1 class="mb-6">AI Fire Detection</h1>
+
+            <!-- Model Status Bar -->
+            <div class="card mb-6">
+                <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px;">
+                    <div style="font-weight:600; font-size:0.875rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em;">Model Status</div>
+                    <div style="display:flex; gap:24px; flex-wrap:wrap;">
+                        <div class="flex items-center gap-2">
+                            <span style="font-weight:500; font-size:0.875rem;">Baseline CNN</span>
+                            <span class="status-pill" id="status-model1">Loading...</span>
+                            <span style="font-size:0.75rem; color:var(--text-muted);">74% acc · ~103MB</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span style="font-weight:500; font-size:0.875rem;">Tuned CNN</span>
+                            <span class="status-pill" id="status-model2">Loading...</span>
+                            <span style="font-size:0.75rem; color:var(--text-muted);">72.5% acc · ~205MB</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span style="font-weight:500; font-size:0.875rem;">MobileNetV3</span>
+                            <span class="status-pill" id="status-model3">Loading...</span>
+                            <span style="font-size:0.75rem; color:var(--text-muted);">75% acc · ~6MB</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mode Selector: Upload vs Camera -->
+            <div class="camera-mode-selector">
+                <div class="mode-btn" id="upload-mode-btn">
+                    Upload Image
+                </div>
+                <div class="mode-btn" id="camera-mode-btn">
+                    Live Camera
+                </div>
+            </div>
+
+            <!-- Upload Mode Section -->
+            <div id="upload-section" class="card mb-6">
+                <div class="card-header">Upload Drone / Satellite Imagery</div>
+                <div class="upload-area" id="drop-zone" onclick="document.getElementById('file-input').click()">
+                    <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="2"
+                        style="color:var(--text-muted); margin-bottom:12px; display:inline-block;">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    <p style="font-weight:500;">Drag & drop image here or click to browse</p>
+                    <p style="font-size:0.875rem; color:var(--text-muted); margin-top:8px;">Supports JPG, PNG, WEBP · Max 10MB</p>
+                    <input type="file" id="file-input" style="display:none" accept="image/*">
+                </div>
+
+                <div id="image-preview-container" style="display:none; margin-top:20px; text-align:center;">
+                    <img id="image-preview" style="max-width:100%; max-height:300px; border-radius:8px; border:1px solid var(--border-light);" />
+                    <div style="margin-top:12px; font-size:0.875rem; color:var(--text-muted);" id="image-meta"></div>
+                    <div class="flex gap-4 justify-center mt-4">
+                        <button class="btn btn-outline" id="reset-btn">Reset</button>
+                        <button class="btn btn-fire" id="run-inference-btn" disabled>Loading models...</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Camera Mode Section -->
+            <div id="camera-section" style="display: none;">
+                <div class="camera-container">
+                    <video id="video" autoplay playsinline muted></video>
+                    <div class="real-time-badge">
+                        <div class="recording-dot"></div>
+                        <span>Live Detection</span>
+                    </div>
+                    <div id="camera-overlay" class="camera-overlay" style="display: none;">
+                        Analyzing frame...
+                    </div>
+                </div>
+                <div class="camera-controls">
+                    <button class="btn btn-outline" id="stop-camera-btn">Stop Camera</button>
+                    <button class="btn btn-fire" id="capture-snapshot-btn">Capture & Analyze</button>
+                </div>
+                <div class="card mt-4" id="camera-results-card" style="display: none;">
+                    <div class="card-header">
+                        Last Capture Results
+                        <button class="btn btn-outline" id="clear-camera-results" style="padding:4px 12px;">Clear</button>
+                    </div>
+                    <div id="camera-results-content"></div>
+                </div>
+            </div>
+
+            <!-- Results Card (for upload mode) -->
+            <div class="card" id="results-card" style="display:none;">
+                <div class="card-header">Inference Results</div>
+
+                <!-- Best Model Result -->
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; padding-bottom:16px; border-bottom:2px solid var(--border-dark);">
+                    <div>
+                        <div style="font-size:0.875rem; color:var(--text-muted); font-weight:600; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">MobileNetV3 Result (Best Model)</div>
+                        <div style="font-size:1.5rem; font-weight:700;" id="consensus-class">--</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-size:0.875rem; color:var(--text-muted);">Confidence</div>
+                        <div style="font-size:1.5rem; font-weight:700;" id="consensus-conf">--</div>
+                    </div>
+                </div>
+
+                <div style="font-size:0.875rem; font-weight:600; color:var(--text-muted); margin-bottom:16px; text-transform:uppercase; letter-spacing:0.05em;">
+                    Individual Model Outputs
+                </div>
+
+                <!-- 3-column model results -->
+                <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:16px;">
+
+                    <!-- MobileNetV3 -->
+                    <div class="model-col">
+                        <div class="model-col-header">
+                            MobileNetV3
+                            <span style="font-size:0.7rem; font-weight:500; color:var(--safe); background:var(--safe-bg); padding:2px 7px; border-radius:4px;">Best</span>
+                        </div>
+                        <div class="model-col-row">
+                            <div class="model-col-label-row"><span>Fire</span><span class="model-col-pct" id="m3-pct-fire">0%</span></div>
+                            <div class="progress-bar-container"><div class="progress-bar" style="background:var(--fire);" id="m3-bar-fire"></div></div>
+                        </div>
+                        <div class="model-col-row">
+                            <div class="model-col-label-row"><span>Smoke & Fire</span><span class="model-col-pct" id="m3-pct-smokefire">0%</span></div>
+                            <div class="progress-bar-container"><div class="progress-bar" style="background:var(--warn);" id="m3-bar-smokefire"></div></div>
+                        </div>
+                        <div class="model-col-row">
+                            <div class="model-col-label-row"><span>Smoke</span><span class="model-col-pct" id="m3-pct-smoke">0%</span></div>
+                            <div class="progress-bar-container"><div class="progress-bar" style="background:var(--smoke);" id="m3-bar-smoke"></div></div>
+                        </div>
+                        <div class="model-col-row">
+                            <div class="model-col-label-row"><span>No Fire</span><span class="model-col-pct" id="m3-pct-nofire">0%</span></div>
+                            <div class="progress-bar-container"><div class="progress-bar" style="background:var(--safe);" id="m3-bar-nofire"></div></div>
+                        </div>
+                    </div>
+
+                    <!-- Tuned CNN -->
+                    <div class="model-col">
+                        <div class="model-col-header">Tuned CNN</div>
+                        <div class="model-col-row">
+                            <div class="model-col-label-row"><span>Fire</span><span class="model-col-pct" id="m2-pct-fire">0%</span></div>
+                            <div class="progress-bar-container"><div class="progress-bar" style="background:var(--fire);" id="m2-bar-fire"></div></div>
+                        </div>
+                        <div class="model-col-row">
+                            <div class="model-col-label-row"><span>Smoke & Fire</span><span class="model-col-pct" id="m2-pct-smokefire">0%</span></div>
+                            <div class="progress-bar-container"><div class="progress-bar" style="background:var(--warn);" id="m2-bar-smokefire"></div></div>
+                        </div>
+                        <div class="model-col-row">
+                            <div class="model-col-label-row"><span>Smoke</span><span class="model-col-pct" id="m2-pct-smoke">0%</span></div>
+                            <div class="progress-bar-container"><div class="progress-bar" style="background:var(--smoke);" id="m2-bar-smoke"></div></div>
+                        </div>
+                        <div class="model-col-row">
+                            <div class="model-col-label-row"><span>No Fire</span><span class="model-col-pct" id="m2-pct-nofire">0%</span></div>
+                            <div class="progress-bar-container"><div class="progress-bar" style="background:var(--safe);" id="m2-bar-nofire"></div></div>
+                        </div>
+                    </div>
+
+                    <!-- Baseline CNN -->
+                    <div class="model-col">
+                        <div class="model-col-header">Baseline CNN</div>
+                        <div class="model-col-row">
+                            <div class="model-col-label-row"><span>Fire</span><span class="model-col-pct" id="m1-pct-fire">0%</span></div>
+                            <div class="progress-bar-container"><div class="progress-bar" style="background:var(--fire);" id="m1-bar-fire"></div></div>
+                        </div>
+                        <div class="model-col-row">
+                            <div class="model-col-label-row"><span>Smoke & Fire</span><span class="model-col-pct" id="m1-pct-smokefire">0%</span></div>
+                            <div class="progress-bar-container"><div class="progress-bar" style="background:var(--warn);" id="m1-bar-smokefire"></div></div>
+                        </div>
+                        <div class="model-col-row">
+                            <div class="model-col-label-row"><span>Smoke</span><span class="model-col-pct" id="m1-pct-smoke">0%</span></div>
+                            <div class="progress-bar-container"><div class="progress-bar" style="background:var(--smoke);" id="m1-bar-smoke"></div></div>
+                        </div>
+                        <div class="model-col-row">
+                            <div class="model-col-label-row"><span>No Fire</span><span class="model-col-pct" id="m1-pct-nofire">0%</span></div>
+                            <div class="progress-bar-container"><div class="progress-bar" style="background:var(--safe);" id="m1-bar-nofire"></div></div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <!-- Analytics View -->
+        <div id="analytics-view" class="view">
+            <h1 class="mb-6">Analytics & Reporting</h1>
+
+            <div class="grid grid-4 mb-6">
+                <div class="card">
+                    <div class="card-header">Total Incidents (YTD)</div>
+                    <div class="stat-val">412</div>
+                    <div class="stat-desc text-warn">+15% vs last year</div>
+                </div>
+                <div class="card">
+                    <div class="card-header">False Alarm Rate</div>
+                    <div class="stat-val">4.2%</div>
+                    <div class="stat-desc text-safe">-2.1% improvement</div>
+                </div>
+                <div class="card">
+                    <div class="card-header">Avg Response Time</div>
+                    <div class="stat-val">24m 15s</div>
+                    <div class="stat-desc">Across all zones</div>
+                </div>
+                <div class="card">
+                    <div class="card-header">Est. Area Saved</div>
+                    <div class="stat-val">8,450 Ha</div>
+                    <div class="stat-desc text-safe">Based on baseline models</div>
+                </div>
+            </div>
+
+            <div class="grid grid-main-side mb-6">
+                <div class="card">
+                    <div class="card-header">Monthly Incidents</div>
+                    <div class="chart-mock">
+                        <div class="chart-bar" style="height:10%;"><div class="chart-label">Apr</div></div>
+                        <div class="chart-bar" style="height:15%;"><div class="chart-label">May</div></div>
+                        <div class="chart-bar" style="height:20%;"><div class="chart-label">Jun</div></div>
+                        <div class="chart-bar" style="height:10%;"><div class="chart-label">Jul</div></div>
+                        <div class="chart-bar" style="height:5%;"><div class="chart-label">Aug</div></div>
+                        <div class="chart-bar" style="height:8%;"><div class="chart-label">Sep</div></div>
+                        <div class="chart-bar" style="height:25%;"><div class="chart-label">Oct</div></div>
+                        <div class="chart-bar" style="height:40%;"><div class="chart-label">Nov</div></div>
+                        <div class="chart-bar" style="height:60%;"><div class="chart-label">Dec</div></div>
+                        <div class="chart-bar" style="height:80%;"><div class="chart-label">Jan</div></div>
+                        <div class="chart-bar" style="height:95%; background:var(--fire);"><div class="chart-label" style="color:var(--fire); font-weight:700;">Feb</div></div>
+                        <div class="chart-bar" style="height:65%;"><div class="chart-label">Mar</div></div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header">Incident Types</div>
+                    <div style="display:flex; justify-content:center; align-items:center; height:250px;">
+                        <div style="width:150px; height:150px; border-radius:50%; background:conic-gradient(var(--fire) 0% 60%, var(--warn) 60% 85%, var(--smoke) 85% 95%, var(--safe) 95% 100%); position:relative;">
+                            <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:100px; height:100px; background:var(--cards); border-radius:50%;"></div>
+                        </div>
+                    </div>
+                    <div class="flex justify-center gap-4 mt-4" style="font-size:0.75rem;">
+                        <div class="flex items-center gap-2"><div style="width:10px;height:10px;background:var(--fire);"></div>Forest Fire (60%)</div>
+                        <div class="flex items-center gap-2"><div style="width:10px;height:10px;background:var(--warn);"></div>Brush (25%)</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">Fire Weather Index (FWI) - High Risk Districts</div>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>District</th><th>Province</th><th>Temperature</th>
+                            <th>Humidity</th><th>Wind Speed</th><th>FWI Score</th><th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td style="font-weight:500;">Chitwan</td><td>Bagmati</td><td>32°C</td><td>18%</td><td>15 km/h</td>
+                            <td style="font-weight:700; color:var(--fire);">42.5</td>
+                            <td><span class="alert-badge badge-critical">Critical</span></td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight:500;">Bardiya</td><td>Lumbini</td><td>34°C</td><td>15%</td><td>12 km/h</td>
+                            <td style="font-weight:700; color:var(--fire);">38.2</td>
+                            <td><span class="alert-badge badge-critical">Critical</span></td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight:500;">Kanchanpur</td><td>Sudurpaschim</td><td>31°C</td><td>22%</td><td>18 km/h</td>
+                            <td style="font-weight:700; color:var(--warn);">29.1</td>
+                            <td><span class="alert-badge badge-high">High</span></td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight:500;">Banke</td><td>Lumbini</td><td>33°C</td><td>20%</td><td>10 km/h</td>
+                            <td style="font-weight:700; color:var(--warn);">27.8</td>
+                            <td><span class="alert-badge badge-high">High</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script>
+// Navigation
+const navItems = document.querySelectorAll('.nav-item');
+const views    = document.querySelectorAll('.view');
+
+navItems.forEach(item => {
+    item.addEventListener('click', () => {
+        navItems.forEach(n => n.classList.remove('active'));
+        views.forEach(v => v.classList.remove('active'));
+        item.classList.add('active');
+        document.getElementById(item.dataset.target).classList.add('active');
+        if (item.dataset.target === 'dashboard-view') {
+            setTimeout(() => { if (dashMap) dashMap.invalidateSize(); }, 100);
+        }
+        // Stop camera when leaving AI view
+        if (item.dataset.target !== 'ai-view' && cameraActive) {
+            stopCamera();
+        }
+    });
+});
+
+// Clock
+function updateClock() {
+    const now = new Date();
+    const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+    const nst = new Date(utc + (3600000 * 5.75));
+    document.getElementById('clock').innerText = nst.toLocaleTimeString('en-US', { hour12: false }) + ' NST';
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// Alerts
+function ackAlert(id) {
+    const el = document.getElementById(id);
+    if (el) {
+        el.style.opacity = '0.5';
+        const btn = el.querySelector('button');
+        if (btn) {
+            btn.innerText = 'Acked';
+            btn.disabled  = true;
+        }
+    }
+}
+
+// Leaflet Map
+const dashMap = L.map('leaflet-dash-map', { zoomControl: false }).setView([28.3949, 84.1240], 6);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+}).addTo(dashMap);
+
+const fireIcon = L.divIcon({
+    className: 'custom-div-icon',
+    html: '<div style="background-color:#c8290a;width:14px;height:14px;border-radius:50%;box-shadow:0 0 12px #c8290a; border:2px solid white;"></div>',
+    iconSize: [14, 14], iconAnchor: [7, 7]
+});
+const warnIcon = L.divIcon({
+    className: 'custom-div-icon',
+    html: '<div style="background-color:#b86000;width:12px;height:12px;border-radius:50%;box-shadow:0 0 10px #b86000; border:2px solid white;"></div>',
+    iconSize: [12, 12], iconAnchor: [6, 6]
+});
+
+// Static known high-risk zones
+[
+    { name:"Chitwan National Park",  lat:27.5342, lon:84.4521, radius:30000, color:'#c8290a' },
+    { name:"Bardiya Forest Reserve", lat:28.3210, lon:81.3540, radius:25000, color:'#c8290a' },
+    { name:"Kanchanpur Zone",        lat:28.9800, lon:80.1800, radius:20000, color:'#b86000' },
+].forEach(z => {
+    L.circle([z.lat, z.lon], { color:z.color, fillColor:z.color, fillOpacity:0.15, weight:2, dashArray:'4', radius:z.radius })
+     .bindPopup(`<strong>${z.name}</strong><br>High Risk Zone`)
+     .addTo(dashMap);
+});
+
+// Static safe/command bases
+[
+    { name:"Kathmandu Base", lat:27.7172, lon:85.3240, radius:15000 },
+    { name:"Pokhara Base",   lat:28.2096, lon:83.9856, radius:12000 },
+    { name:"Ilam Base",      lat:26.9080, lon:87.9250, radius:10000 },
+].forEach(z => {
+    L.circle([z.lat, z.lon], { color:'#1a7a3c', fillColor:'#1a7a3c', fillOpacity:0.15, weight:2, dashArray:'4', radius:z.radius })
+     .bindPopup(`<strong>${z.name}</strong><br>Safe Zone / Command Base`)
+     .addTo(dashMap);
+});
+
+// Helper: time ago
+function timeAgo(dateStr) {
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const mins  = Math.floor(diff / 60000);
+    const hrs   = Math.floor(diff / 3600000);
+    const days  = Math.floor(diff / 86400000);
+    if (mins < 60)  return `${mins}m ago`;
+    if (hrs  < 24)  return `${hrs}h ago`;
+    return `${days}d ago`;
+}
+
+// NASA EONET Fire Data
+async function fetchFireData() {
+    const sourceEl   = document.getElementById('data-source-indicator');
+    const countEl    = document.getElementById('active-fire-count');
+    const descEl     = document.getElementById('active-fire-desc');
+    const alertsList = document.getElementById('alerts-list');
+    const mapUpdated = document.getElementById('map-last-updated');
+
+    try {
+        const res  = await fetch('https://eonet.gsfc.nasa.gov/api/v3/events?category=wildfires&status=open&limit=100&days=60');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        const nepalEvents    = [];
+        const southAsiaEvents = [];
+
+        data.events.forEach(event => {
+            if (!event.geometry || !event.geometry.length) return;
+            const geo = event.geometry[event.geometry.length - 1];
+            if (!geo || geo.type !== 'Point') return;
+            const [lon, lat] = geo.coordinates;
+            const date = geo.date || event.geometry[0].date;
+
+            if (lat >= 26.3 && lat <= 30.5 && lon >= 80.0 && lon <= 88.3) {
+                nepalEvents.push({ title: event.title, lat, lon, date, id: event.id });
+            } else if (lat >= 20 && lat <= 35 && lon >= 68 && lon <= 97) {
+                southAsiaEvents.push({ title: event.title, lat, lon, date, id: event.id });
+            }
+        });
+
+        nepalEvents.forEach(e => {
+            L.marker([e.lat, e.lon], { icon: fireIcon })
+             .addTo(dashMap)
+             .bindPopup(`<strong>${e.title}</strong><br>Nepal Region<br>${timeAgo(e.date)}<br><small>Source: NASA EONET</small>`);
+        });
+
+        southAsiaEvents.slice(0, 10).forEach(e => {
+            L.marker([e.lat, e.lon], { icon: warnIcon })
+             .addTo(dashMap)
+             .bindPopup(`<strong>${e.title}</strong><br>South Asia<br>${timeAgo(e.date)}<br><small>Source: NASA EONET</small>`);
+        });
+
+        const totalNepal = nepalEvents.length;
+        countEl.innerHTML = totalNepal;
+        countEl.style.color = totalNepal > 0 ? 'var(--fire)' : 'var(--safe)';
+        descEl.innerText = totalNepal > 0 ? `Live · NASA EONET · ${data.events.length} global events` : 'No active fires in Nepal · NASA EONET';
+
+        sourceEl.innerHTML = `Live · NASA EONET`;
+        sourceEl.style.color = 'var(--safe)';
+        mapUpdated.innerText = `Updated ${new Date().toLocaleTimeString('en-US', { hour12:false, hour:'2-digit', minute:'2-digit' })} NST`;
+
+        alertsList.innerHTML = '';
+        const alertEvents = nepalEvents.length > 0 ? nepalEvents : southAsiaEvents.slice(0, 3);
+
+        if (alertEvents.length === 0) {
+            alertsList.innerHTML = `<div style="text-align:center; padding:24px 0; color:var(--safe);">
+                <div style="font-size:1.5rem; margin-bottom:8px;">✓</div>
+                <div style="font-weight:600;">No Active Fires Detected</div>
+                <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Source: NASA EONET</div>
+            </div>`;
+        } else {
+            alertEvents.slice(0, 5).forEach((e, i) => {
+                const isNepal   = nepalEvents.includes(e);
+                const severity  = isNepal ? 'critical' : 'high';
+                const badgeCls  = isNepal ? 'badge-critical' : 'badge-high';
+                const label     = isNepal ? 'Critical' : 'High';
+                const alertId   = `eonet-alert-${i}`;
+                alertsList.innerHTML += `
+                    <div class="alert-item ${severity}" id="${alertId}">
+                        <div>
+                            <div class="mb-2">
+                                <span class="alert-badge ${badgeCls}">${label}</span>
+                                <span style="font-size:0.75rem; color:var(--text-muted); margin-left:8px;">${timeAgo(e.date)}</span>
+                            </div>
+                            <div style="font-weight:600; font-size:0.875rem;">${e.title}</div>
+                            <div style="font-size:0.75rem; color:var(--text-muted);">Lat: ${e.lat.toFixed(2)}, Lng: ${e.lon.toFixed(2)}</div>
+                        </div>
+                        <button class="btn btn-outline" style="padding:4px 8px; font-size:0.75rem; flex-shrink:0;"
+                            onclick="ackAlert('${alertId}')">Ack</button>
+                    </div>`;
+            });
+        }
+    } catch (err) {
+        console.warn('NASA EONET fetch failed:', err.message);
+        L.marker([27.53, 84.45], { icon: fireIcon }).addTo(dashMap).bindPopup('<strong>Chitwan</strong><br>Demo data — EONET unavailable');
+        L.marker([28.32, 81.35], { icon: warnIcon }).addTo(dashMap).bindPopup('<strong>Bardiya</strong><br>Demo data — EONET unavailable');
+        countEl.innerHTML = '2*';
+        countEl.style.color = 'var(--warn)';
+        descEl.innerText = 'Demo data — NASA EONET unavailable';
+        sourceEl.innerHTML = 'Demo mode';
+        sourceEl.style.color = 'var(--warn)';
+        mapUpdated.innerText = 'EONET connection failed';
+        alertsList.innerHTML = `
+            <div class="alert-item critical" id="demo-alert-1">
+                <div>
+                    <div class="mb-2"><span class="alert-badge badge-critical">Critical</span>
+                    <span style="font-size:0.75rem; color:var(--text-muted); margin-left:8px;">Demo</span></div>
+                    <div style="font-weight:600; font-size:0.875rem;">Chitwan National Park</div>
+                    <div style="font-size:0.75rem; color:var(--text-muted);">Lat: 27.53, Lng: 84.45 · Demo data</div>
+                </div>
+                <button class="btn btn-outline" style="padding:4px 8px; font-size:0.75rem;"
+                    onclick="ackAlert('demo-alert-1')">Ack</button>
+            </div>
+            <div class="alert-item high" id="demo-alert-2">
+                <div>
+                    <div class="mb-2"><span class="alert-badge badge-high">High</span>
+                    <span style="font-size:0.75rem; color:var(--text-muted); margin-left:8px;">Demo</span></div>
+                    <div style="font-weight:600; font-size:0.875rem;">Bardiya Forest Reserve</div>
+                    <div style="font-size:0.75rem; color:var(--text-muted);">Lat: 28.32, Lng: 81.35 · Demo data</div>
+                </div>
+                <button class="btn btn-outline" style="padding:4px 8px; font-size:0.75rem;"
+                    onclick="ackAlert('demo-alert-2')">Ack</button>
+            </div>`;
+    }
+}
+
+fetchFireData();
+setInterval(fetchFireData, 10 * 60 * 1000);
+
+// AI Inference
+const CLASSES = ['fire', 'nofire', 'smoke', 'smokefire'];
+const MEAN    = [0.485, 0.456, 0.406];
+const STD     = [0.229, 0.224, 0.225];
+const SZ      = 224;
+const MAX_FILE_MB = 10;
+
+const dropZone         = document.getElementById('drop-zone');
+const fileInput        = document.getElementById('file-input');
+const previewContainer = document.getElementById('image-preview-container');
+const previewImg       = document.getElementById('image-preview');
+const metaText         = document.getElementById('image-meta');
+const resetBtn         = document.getElementById('reset-btn');
+const runBtn           = document.getElementById('run-inference-btn');
+const resultsCard      = document.getElementById('results-card');
+
+let sessions      = {};
+let model3Ready   = false;
+
+// Camera variables
+let cameraActive = false;
+let stream = null;
+let videoElement = null;
+
+// Mode switching
+const uploadModeBtn = document.getElementById('upload-mode-btn');
+const cameraModeBtn = document.getElementById('camera-mode-btn');
+const uploadSection = document.getElementById('upload-section');
+const cameraSection = document.getElementById('camera-section');
+
+uploadModeBtn.addEventListener('click', () => {
+    uploadModeBtn.classList.add('active');
+    cameraModeBtn.classList.remove('active');
+    uploadSection.style.display = 'block';
+    cameraSection.style.display = 'none';
+    if (cameraActive) stopCamera();
+});
+
+cameraModeBtn.addEventListener('click', async () => {
+    cameraModeBtn.classList.add('active');
+    uploadModeBtn.classList.remove('active');
+    uploadSection.style.display = 'none';
+    cameraSection.style.display = 'block';
+    await startCamera();
+});
+
+// Drag & drop for upload
+['dragenter','dragover','dragleave','drop'].forEach(e => dropZone.addEventListener(e, ev => { ev.preventDefault(); ev.stopPropagation(); }));
+['dragenter','dragover'].forEach(e => dropZone.addEventListener(e, () => dropZone.classList.add('dragover')));
+['dragleave','drop'].forEach(e => dropZone.addEventListener(e, () => dropZone.classList.remove('dragover')));
+dropZone.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
+fileInput.addEventListener('change', function() { handleFiles(this.files); });
+
+function handleFiles(files) {
+    if (!files.length) return;
+    const file = files[0];
+    if (!file.type.startsWith('image/')) { alert('Please upload an image file (JPG, PNG, WEBP).'); return; }
+    if (file.size > MAX_FILE_MB * 1024 * 1024) {
+        alert(`File too large. Please upload an image under ${MAX_FILE_MB}MB.`);
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = e => {
+        previewImg.src      = e.target.result;
+        metaText.innerText  = `${file.name} · ${(file.size/1024/1024).toFixed(2)} MB`;
+        dropZone.style.display         = 'none';
+        previewContainer.style.display = 'block';
+        resultsCard.style.display      = 'none';
+        resetModelUI();
+
+        runBtn.disabled  = !model3Ready;
+        runBtn.innerText = model3Ready ? 'Run Inference' : 'Loading models...';
+    };
+    reader.readAsDataURL(file);
+}
+
+function resetModelUI() {
+    ['m1','m2','m3'].forEach(m => {
+        ['fire','smokefire','smoke','nofire'].forEach(c => {
+            document.getElementById(`${m}-bar-${c}`).style.width = '0%';
+            document.getElementById(`${m}-pct-${c}`).innerText   = '0%';
+        });
+    });
+}
+
+resetBtn.addEventListener('click', () => {
+    dropZone.style.display         = 'block';
+    previewContainer.style.display = 'none';
+    resultsCard.style.display      = 'none';
+    fileInput.value = '';
+});
+
+// Camera Functions
+async function startCamera() {
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        videoElement = document.getElementById('video');
+        videoElement.srcObject = stream;
+        await videoElement.play();
+        cameraActive = true;
+    } catch (err) {
+        console.error('Camera error:', err);
+        alert('Unable to access camera. Please ensure you have granted camera permissions and are using HTTPS or localhost.');
+    }
+}
+
+function stopCamera() {
+    if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        stream = null;
+    }
+    cameraActive = false;
+    if (videoElement) videoElement.srcObject = null;
+}
+
+document.getElementById('stop-camera-btn').addEventListener('click', stopCamera);
+document.getElementById('capture-snapshot-btn').addEventListener('click', captureAndAnalyze);
+document.getElementById('clear-camera-results').addEventListener('click', () => {
+    document.getElementById('camera-results-card').style.display = 'none';
+    document.getElementById('camera-results-content').innerHTML = '';
+});
+
+async function captureAndAnalyze() {
+    if (!videoElement || !cameraActive) {
+        alert('Camera is not active. Please start the camera first.');
+        return;
+    }
+    if (!model3Ready) {
+        alert('Models are still loading. Please wait a moment.');
+        return;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = videoElement.videoWidth;
+    canvas.height = videoElement.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+    
+    const imageDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+    
+    // Show preview modal
+    const modal = document.createElement('div');
+    modal.className = 'snapshot-preview';
+    modal.innerHTML = `
+        <img src="${imageDataUrl}" alt="Snapshot" />
+        <button class="close-snapshot" onclick="this.parentElement.remove()">✕</button>
+        <div style="position:absolute; bottom:30px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.8); color:white; padding:8px 16px; border-radius:20px; font-size:14px;">
+            Analyzing with AI...
+        </div>
+    `;
+    document.body.appendChild(modal);
+    
+    // Perform inference
+    const img = new Image();
+    img.onload = async () => {
+        const results = await runInferenceOnImage(img);
+        displayCameraResults(results, imageDataUrl);
+        modal.remove();
+    };
+    img.src = imageDataUrl;
+}
+
+async function runInferenceOnImage(imgElement) {
+    const tensor = preprocessImage(imgElement);
+    const modelMap = [
+        { prefix:'m1', key:'model1' },
+        { prefix:'m2', key:'model2' },
+        { prefix:'m3', key:'model3' },
+    ];
+    
+    const results = await Promise.all(modelMap.map(async ({ prefix, key }) => {
+        try {
+            const r = await runModelInference(key, tensor);
+            return { model: key, result: r };
+        } catch(e) {
+            console.warn(key, e.message);
+            return null;
+        }
+    }));
+    
+    return results.filter(Boolean);
+}
+
+function displayCameraResults(results, imageDataUrl) {
+    const resultsCard = document.getElementById('camera-results-card');
+    const resultsContent = document.getElementById('camera-results-content');
+    
+    // Get MobileNetV3 result (index 2) or highest confidence
+    const mobilenetResult = results.find(r => r.model === 'model3');
+    const bestResult = mobilenetResult || results.reduce((a, b) => a.result.confidence > b.result.confidence ? a : b);
+    
+    const labelMap = { fire:'FIRE DETECTED', nofire:'NO FIRE', smoke:'SMOKE DETECTED', smokefire:'SMOKE AND FIRE' };
+    const colorMap = { fire:'var(--fire)', nofire:'var(--safe)', smoke:'var(--smoke)', smokefire:'var(--warn)' };
+    
+    let html = `
+        <div style="display:flex; gap:20px; flex-wrap:wrap;">
+            <div style="flex:1; min-width:150px;">
+                <img src="${imageDataUrl}" style="width:100%; border-radius:8px; border:1px solid var(--border-light);" />
+            </div>
+            <div style="flex:2;">
+                <div style="padding:16px; background:${colorMap[bestResult.result.predicted]}20; border-radius:12px; margin-bottom:16px;">
+                    <div style="font-size:0.875rem; color:var(--text-muted); margin-bottom:4px;">AI Analysis Result</div>
+                    <div style="font-size:1.8rem; font-weight:700; color:${colorMap[bestResult.result.predicted]}">${labelMap[bestResult.result.predicted]}</div>
+                    <div style="font-size:1rem; margin-top:8px;">Confidence: ${(bestResult.result.confidence * 100).toFixed(1)}%</div>
+                </div>
+                <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:12px;">
+                    <div><strong>Fire:</strong> ${(bestResult.result.probs.fire * 100).toFixed(1)}%</div>
+                    <div><strong>No Fire:</strong> ${(bestResult.result.probs.nofire * 100).toFixed(1)}%</div>
+                    <div><strong>Smoke:</strong> ${(bestResult.result.probs.smoke * 100).toFixed(1)}%</div>
+                    <div><strong>Smoke+Fire:</strong> ${(bestResult.result.probs.smokefire * 100).toFixed(1)}%</div>
+                </div>
+                <div class="mt-4">
+                    <button class="btn btn-fire" onclick="reportFireLocation()" style="width:100%;">Report to Command Center</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    resultsContent.innerHTML = html;
+    resultsCard.style.display = 'block';
+}
+
+function reportFireLocation() {
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(pos => {
+            const { latitude, longitude } = pos.coords;
+            alert(`Fire reported at:\nLat: ${latitude.toFixed(4)}\nLng: ${longitude.toFixed(4)}\n\nEmergency services have been notified.`);
+            // Add to alerts on map
+            L.marker([latitude, longitude], { icon: fireIcon })
+                .addTo(dashMap)
+                .bindPopup('<strong>User Reported Fire</strong><br>Please verify')
+                .openPopup();
+        }, () => {
+            alert('Unable to get location. Please report manually to local authorities.');
+        });
+    } else {
+        alert('Geolocation not supported. Please report manually.');
+    }
+}
+
+// Preprocessing
+function preprocessImage(imgEl) {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = SZ;
+    const ctx  = canvas.getContext('2d');
+    ctx.drawImage(imgEl, 0, 0, SZ, SZ);
+    const { data } = ctx.getImageData(0, 0, SZ, SZ);
+    const f32 = new Float32Array(3 * SZ * SZ);
+    for (let i = 0; i < SZ * SZ; i++) {
+        f32[0*SZ*SZ+i] = (data[i*4]  /255 - MEAN[0]) / STD[0];
+        f32[1*SZ*SZ+i] = (data[i*4+1]/255 - MEAN[1]) / STD[1];
+        f32[2*SZ*SZ+i] = (data[i*4+2]/255 - MEAN[2]) / STD[2];
+    }
+    return new ort.Tensor('float32', f32, [1, 3, SZ, SZ]);
+}
+
+function softmax(logits) {
+    const max  = Math.max(...logits);
+    const exps = logits.map(x => Math.exp(x - max));
+    const sum  = exps.reduce((a, b) => a + b, 0);
+    return exps.map(x => x / sum);
+}
+
+async function runModelInference(key, tensor) {
+    const s = sessions[key];
+    if (!s) throw new Error('Not loaded');
+    const out   = await s.run({ [s.inputNames[0]]: tensor });
+    const probs = softmax(Array.from(out[s.outputNames[0]].data));
+    const mi    = probs.indexOf(Math.max(...probs));
+    return {
+        predicted:  CLASSES[mi],
+        confidence: probs[mi],
+        probs: { fire:probs[0], nofire:probs[1], smoke:probs[2], smokefire:probs[3] }
+    };
+}
+
+function applyToUI(prefix, result) {
+    ['fire','nofire','smoke','smokefire'].forEach(cls => {
+        const pct = (result.probs[cls] * 100).toFixed(1);
+        document.getElementById(`${prefix}-bar-${cls}`).style.width = pct + '%';
+        document.getElementById(`${prefix}-pct-${cls}`).innerText   = pct + '%';
+    });
+}
+
+// Load ONNX models
+async function initModels() {
+    const models = [
+        { id:'model1', file:'model1_baseline_cnn.onnx' },
+        { id:'model2', file:'model2_tuned_cnn.onnx'    },
+        { id:'model3', file:'model3_mobilenetv3.onnx'  },
+    ];
+    for (const m of models) {
+        const el = document.getElementById(`status-${m.id}`);
+        try {
+            sessions[m.id] = await ort.InferenceSession.create(m.file);
+            el.innerText         = 'Ready';
+            el.style.color       = 'var(--safe)';
+            el.style.background  = 'var(--safe-bg)';
+            el.style.borderColor = 'var(--safe)';
+            if (m.id === 'model3') {
+                model3Ready = true;
+                if (previewContainer.style.display !== 'none') {
+                    runBtn.disabled  = false;
+                    runBtn.innerText = 'Run Inference';
+                }
+            }
+        } catch(e) {
+            el.innerText         = 'Not loaded';
+            el.style.color       = 'var(--fire)';
+            el.style.background  = 'var(--fire-bg)';
+            el.style.borderColor = 'var(--fire)';
+            console.warn(m.file, e.message);
+        }
+    }
+}
+
+window.addEventListener('DOMContentLoaded', initModels);
+
+// Run Inference (Upload Mode)
+runBtn.addEventListener('click', async () => {
+    if (!previewImg.src || previewImg.src === window.location.href) {
+        alert('Please upload an image first.');
+        return;
+    }
+    if (!model3Ready) {
+        alert('MobileNetV3 model is still loading. Please wait.');
+        return;
+    }
+
+    runBtn.disabled  = true;
+    runBtn.innerText = 'Running inference...';
+    resultsCard.style.display = 'block';
+    resetModelUI();
+
+    document.getElementById('consensus-class').innerText = 'Analysing...';
+    document.getElementById('consensus-conf').innerText  = '--';
+
+    const modelMap = [
+        { prefix:'m1', key:'model1' },
+        { prefix:'m2', key:'model2' },
+        { prefix:'m3', key:'model3' },
+    ];
+
+    const results = await Promise.all(modelMap.map(async ({ prefix, key }) => {
+        try {
+            const tensor = preprocessImage(previewImg);
+            const r = await runModelInference(key, tensor);
+            applyToUI(prefix, r);
+            return r;
+        } catch(e) {
+            console.warn(key, e.message);
+            ['fire','nofire','smoke','smokefire'].forEach(c => {
+                document.getElementById(`${prefix}-bar-${c}`).style.width = '0%';
+                document.getElementById(`${prefix}-pct-${c}`).innerText   = 'N/A';
+            });
+            return null;
+        }
+    }));
+
+    const valid = results.filter(Boolean);
+    const best  = results[2] || (valid.length ? valid.reduce((a, b) => a.confidence > b.confidence ? a : b) : null);
+
+    if (best) {
+        const labelMap = { fire:'FIRE DETECTED', nofire:'NO FIRE', smoke:'SMOKE DETECTED', smokefire:'SMOKE AND FIRE' };
+        const colorMap = { fire:'var(--fire)', nofire:'var(--safe)', smoke:'var(--smoke)', smokefire:'var(--warn)' };
+        const el = document.getElementById('consensus-class');
+        el.innerText   = labelMap[best.predicted] || best.predicted.toUpperCase();
+        el.style.color = colorMap[best.predicted] || 'var(--fire)';
+        document.getElementById('consensus-conf').innerText = (best.confidence * 100).toFixed(1) + '%';
+    } else {
+        document.getElementById('consensus-class').innerText = 'Inference failed — check model files';
+        document.getElementById('consensus-conf').innerText  = '--';
+    }
+
+    runBtn.disabled  = false;
+    runBtn.innerText = 'Run Inference Again';
+});
+
+// Add functions to window for onclick access
+window.reportFireLocation = reportFireLocation;
+window.ackAlert = ackAlert;
+</script>
+</body>
+</html>
