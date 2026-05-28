@@ -48,30 +48,12 @@ For development and training:
 - OpenCV
 - NumPy
 
-Model Performance
-The models were trained on a dataset of forest images with fire and non-fire classes. MobileNetV3 offers the best trade-off between accuracy and inference speed, making it suitable for real-time applications.
-
 Deployment
-The project can be deployed to:
-
-GitHub Pages for static hosting
-
-Netlify for better large file handling
-
-Hugging Face Spaces for ML-focused deployment
+The project can be deployed to: https://surakshya.netlify.app 
 
 Any static web hosting service
 
-Limitations
-Models require clear, well-lit images for best results
-
-Performance depends on image quality and resolution
-
-Models may not generalize to all forest types or weather conditions
-
-Inference time varies by model size and hardware
-
-Future Improvements
+## Future Improvements
 Add video stream support for continuous monitoring
 
 Implement drone or CCTV camera integration
@@ -82,15 +64,17 @@ Expand dataset for better generalization
 
 Optimize models for edge device deployment
 
-License
-This project is open source. Please check the repository for license information.
+## 👤 Author
 
-Author
-Sabin Adhikarii
+**SabinAdhikari**  
+GitHub: [SabinAdhikarii](https://github.com/SabinAdhikarii)
 
-Acknowledgments
-ONNX Runtime team for efficient inference
+---
 
-Contributors to the forest fire detection dataset
+## 📞 Support
 
-Open source computer vision community
+For questions or issues, please contact me at sabinofficial99@gmail.com).
+
+---
+
+**Last Updated:** December 2025
