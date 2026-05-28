@@ -27,10 +27,15 @@ All models are exported to ONNX format for cross-platform compatibility and effi
 ## Project Structure
 Forest_Fire_Detection/
 ├── index.html # Web interface
+
 ├── model1_baseline_cnn.onnx # Baseline CNN model
+
 ├── model2_tuned_cnn.onnx # Tuned CNN model
+
 ├── model3_mobilenetv3.onnx # MobileNetV3 model
+
 ├── Forest Fire_Dataset/ # Training dataset (ignored from git)
+
 └── [notebook files].ipynb # Training and experimentation notebooks
 
 
@@ -49,7 +54,7 @@ For development and training:
 - NumPy
 
 Deployment
-The project can be deployed to: https://surakshya.netlify.app 
+The project is deployed to: https://surakshya.netlify.app 
 
 Any static web hosting service
 
