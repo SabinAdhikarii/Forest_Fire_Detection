@@ -24,20 +24,18 @@ All models are exported to ONNX format for cross-platform compatibility and effi
 - ONNX Runtime support for fast inference
 - Jupyter notebook for model training and experimentation
 
+----
 ## Project Structure
+```
 Forest_Fire_Detection/
-├── index.html # Web interface
 
-├── model1_baseline_cnn.onnx # Baseline CNN model
-
-├── model2_tuned_cnn.onnx # Tuned CNN model
-
+├── index.html
+├── model1_baseline_cnn.onnx 
+├── model2_tuned_cnn.onnx 
 ├── model3_mobilenetv3.onnx # MobileNetV3 model
-
-├── Forest Fire_Dataset/ # Training dataset (ignored from git)
-
-└── [notebook files].ipynb # Training and experimentation notebooks
-
+├── Forest Fire_Dataset/ 
+└── [notebook files].ipynb 
+```
 
 ## Requirements
 
