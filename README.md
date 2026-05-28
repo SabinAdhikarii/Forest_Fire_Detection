@@ -52,7 +52,7 @@ For development and training:
 - NumPy
 
 Deployment
-The project is deployed to: https://surakshya.netlify.app 
+The project is deployed to: https://surakshyaa.netlify.app 
 
 Any static web hosting service
 
